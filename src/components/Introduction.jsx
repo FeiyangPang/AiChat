@@ -32,7 +32,7 @@ function Introduction({ onStart }) {
             <ul>
               <li><strong>0. 禁止商用！分享这代码只是我学习网页开发途中的正常学术交流！</strong></li>
               <li><strong>1. Deepseek Api 充 1米都可以玩，这钱是直接给deepseek官方的，并不是给我的！！！你后续要用这个api做别的任务是完全不影响的！！！</strong></li>
-              <li><strong>2. 本代码完全开源！在github上可搜！不存在什么病毒木马暴露隐私那你电脑挖矿（我要是有那水平就好了喵qwq)，你可以随便看我简陋的代码或者把代码丢给ai问这含不含病毒，或者会不会泄露你隐私。</strong></li>
+              <li><strong>2. 本代码完全开源！在github上可搜！https://github.com/FeiyangPang/AiChat！ 不存在什么病毒木马暴露隐私那你电脑挖矿（我要是有那水平就好了喵qwq)，你可以随便看我简陋的代码或者把代码丢给ai问这含不含病毒，或者会不会泄露你隐私。</strong></li>
               <li><strong>3. 版本为1.0，若有任何bug或者想要优化新增的内容请联系qq 1276025418，请勿骚扰，备注来意</strong></li>
               <li><strong>4. 后续会做功能的更新以及好玩的世界书的更新</strong></li>
             </ul>

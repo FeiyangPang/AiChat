@@ -3,12 +3,15 @@ import './App.css'
 import Introduction from './components/Introduction'
 import GamePlay from './components/GamePlay'
 import ErrorBoundary from './components/ErrorBoundary'
+import SplashScreen from './components/SplashScreen'
 
 function App() {
+  const [showSplash, setShowSplash] = useState(true)
   const [showIntroduction, setShowIntroduction] = useState(true)
   const [apiKey, setApiKey] = useState('')
   const [worldBook, setWorldBook] = useState('')
   const [selectedRole, setSelectedRole] = useState({ name: '', description: '' })
+  const [stableDiffusionApiKey, setStableDiffusionApiKey] = useState('')
 
   useEffect(() => {
     try {
@@ -41,19 +44,27 @@ function App() {
     }
   }
 
+  const handleSplashComplete = () => {
+    setShowSplash(false)
+  }
+
   return (
     <div className="app">
       <ErrorBoundary>
-        {showIntroduction ? (
+        {showSplash ? (
+          <SplashScreen onComplete={handleSplashComplete} />
+        ) : showIntroduction ? (
           <Introduction onStart={handleStart} />
         ) : (
           <GamePlay
             apiKey={apiKey}
             worldBook={worldBook}
             role={selectedRole}
+            stableDiffusionApiKey={stableDiffusionApiKey}
             onApiChange={handleApiChange}
             onWorldBookChange={handleWorldBookChange}
             onRoleChange={handleRoleChange}
+            onStableDiffusionApiChange={setStableDiffusionApiKey}
           />
         )}
       </ErrorBoundary>

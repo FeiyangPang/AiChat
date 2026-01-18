@@ -168,3 +168,142 @@ ${userInstruction}
   }
 }
 
+export async function generateRoleDescription(apiKey, roleName = '', userDescription = '') {
+  if (!apiKey || apiKey.trim().length === 0) {
+    throw new Error('API密钥为空，请先设置API密钥')
+  }
+
+  let prompt = ''
+  
+  if (userDescription && userDescription.trim()) {
+    // 如果用户提供了详细描述，基于用户描述生成完整的角色设定
+    if (roleName && roleName.trim()) {
+      prompt = `请基于以下用户提供的角色信息，生成一个详细、完整、符合用户心愿的角色设定。
+
+角色名称：${roleName}
+
+用户提供的角色详细描述：
+${userDescription}
+
+重要要求（必须严格遵循）：
+1. 必须完整保留用户描述中的所有内容，不能遗漏任何信息
+2. 必须严格按照用户的描述和心愿来生成角色设定，不能偏离用户的意图
+3. 基于用户提供的描述，进行详细、全面的扩展和补充，生成一个完整的角色设定
+4. 角色设定应该包括但不限于：
+   - 角色的基本信息（姓名、年龄、性别、外貌特征等）
+   - 角色的性格特点、行为习惯、说话风格
+   - 角色的身份、地位、背景故事
+   - 角色的社交关系、人际关系
+   - 角色的能力、技能、特长
+   - 角色的目标、动机、理想
+   - 角色的喜好、厌恶、习惯
+   - 角色的过去经历和重要事件
+   - 角色在故事中的定位和作用
+5. 生成的设定要详细、生动、具体，让角色形象丰满立体
+6. 必须确保生成的内容完全符合用户的描述和心愿，不能添加与用户意愿不符的内容
+7. 如果用户描述中提到了特定设定（如职业、能力、关系等），必须在生成的角色设定中完整保留并详细展开
+
+请用中文生成详细完整的角色设定，字数控制在1500-4000字之间。确保用户描述的所有内容都完整包含在生成的角色设定中，并且严格符合用户的心愿和意图。`
+    } else {
+      prompt = `请基于以下用户提供的角色描述，生成一个详细、完整、符合用户心愿的角色设定。
+
+用户提供的角色详细描述：
+${userDescription}
+
+重要要求（必须严格遵循）：
+1. 必须完整保留用户描述中的所有内容，不能遗漏任何信息
+2. 必须严格按照用户的描述和心愿来生成角色设定，不能偏离用户的意图
+3. 基于用户提供的描述，进行详细、全面的扩展和补充，生成一个完整的角色设定
+4. 角色设定应该包括但不限于：
+   - 角色的基本信息（姓名、年龄、性别、外貌特征等）
+   - 角色的性格特点、行为习惯、说话风格
+   - 角色的身份、地位、背景故事
+   - 角色的社交关系、人际关系
+   - 角色的能力、技能、特长
+   - 角色的目标、动机、理想
+   - 角色的喜好、厌恶、习惯
+   - 角色的过去经历和重要事件
+   - 角色在故事中的定位和作用
+5. 生成的设定要详细、生动、具体，让角色形象丰满立体
+6. 必须确保生成的内容完全符合用户的描述和心愿，不能添加与用户意愿不符的内容
+7. 如果用户描述中提到了特定设定（如职业、能力、关系等），必须在生成的角色设定中完整保留并详细展开
+
+请用中文生成详细完整的角色设定，字数控制在1500-4000字之间。确保用户描述的所有内容都完整包含在生成的角色设定中，并且严格符合用户的心愿和意图。`
+    }
+  } else {
+    // 如果用户只提供了角色名称，基于名称生成角色设定
+    if (roleName && roleName.trim()) {
+      prompt = `请为以下角色名称生成一个详细、完整、生动的角色设定。
+
+角色名称：${roleName}
+
+角色设定应该包括：
+1. 角色的基本信息（姓名、年龄、性别、外貌特征等）
+2. 角色的性格特点、行为习惯、说话风格
+3. 角色的身份、地位、背景故事
+4. 角色的社交关系、人际关系
+5. 角色的能力、技能、特长
+6. 角色的目标、动机、理想
+7. 角色的喜好、厌恶、习惯
+8. 角色的过去经历和重要事件
+9. 角色在故事中的定位和作用
+
+请用中文生成详细完整的角色设定，字数控制在1500-4000字之间。`
+    } else {
+      throw new Error('请至少提供角色名称或角色描述')
+    }
+  }
+
+  try {
+    const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          {
+            role: 'system',
+            content: '你是一个专业的角色设定构建专家，擅长创造详细、生动、符合用户心愿的角色设定。你必须严格遵循用户的要求，确保用户描述的所有内容都完整包含在生成的角色设定中，并且完全符合用户的意图和心愿。'
+          },
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        temperature: 0.8,
+        max_tokens: 4000
+      })
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.error?.message || `API请求失败: ${response.status}`)
+    }
+
+    const data = await response.json()
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      throw new Error('API返回数据格式错误')
+    }
+    
+    const content = data.choices[0].message.content
+    if (!content || content.trim().length === 0) {
+      throw new Error('API返回内容为空')
+    }
+    return content
+  } catch (error) {
+    console.error('生成角色描述失败:', error)
+    const errorMsg = error.message || '未知错误'
+    if (errorMsg.includes('401') || errorMsg.includes('Unauthorized')) {
+      throw new Error('API密钥无效，请检查API密钥是否正确')
+    } else if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
+      throw new Error('网络连接失败，请检查网络连接')
+    } else {
+      throw new Error(`生成角色描述失败：${errorMsg}`)
+    }
+  }
+}
+

@@ -5,7 +5,7 @@ function Introduction({ onStart }) {
   return (
     <div className="introduction">
       <div className="card">
-        <h1 className="title">角色扮演游戏</h1>
+        <h1 className="title">角色扮演游戏 V 1.0</h1>
         <div className="content">
           <section className="section">
             <h2>游戏介绍：</h2>
@@ -32,8 +32,8 @@ function Introduction({ onStart }) {
             <ul>
               <li><strong>0. 禁止商用！分享这代码只是我学习网页开发途中的正常学术交流！</strong></li>
               <li><strong>1. Deepseek Api 充 1米都可以玩，这钱是直接给deepseek官方的，并不是给我的！！！你后续要用这个api做别的任务是完全不影响的！！！</strong></li>
-              <li><strong>2. 本代码完全开源！在github上可搜！https://github.com/FeiyangPang/AiChat！ 不存在什么病毒木马暴露隐私那你电脑挖矿（我要是有那水平就好了喵qwq)，你可以随便看我简陋的代码或者把代码丢给ai问这含不含病毒，或者会不会泄露你隐私。</strong></li>
-              <li><strong>3. 版本为1.0，若有任何bug或者想要优化新增的内容请联系qq 1276025418，请勿骚扰，备注来意</strong></li>
+              <li><strong>2. 本代码完全开源！在github上可搜！https://github.com/FeiyangPang/AiChat ! 不存在什么病毒木马暴露隐私拿你电脑挖矿（我要是有那水平就好了喵qwq)，你可以随便看我简陋的代码或者把代码丢给ai问这含不含病毒，或者会不会泄露你隐私。</strong></li>
+              <li><strong>3. 若有任何bug或者想要优化新增的内容请联系qq 1276025418，备注来意,请勿骚扰</strong></li>
               <li><strong>4. 后续会做功能的更新以及好玩的世界书的更新</strong></li>
             </ul>
           </section>
@@ -46,6 +46,11 @@ function Introduction({ onStart }) {
               <li>单论创造你想要的世界和故事这一块的自由度没有我这个高。在酒馆想要创造一个临时想出的世界和角色可能要花上一整天或者多天的时间学习写卡，而在这个软件花几分钟描述你就可以玩到你想象中的世界和人物。</li>
             </ol>
             <p className="note">后续会有更多好玩的功能！请期待！</p>
+          </section>
+
+          <section className="section">
+            <h2>版本更新内容</h2>
+            <p>V 1.O 发布完整的角色扮演游戏，含辅助编写世界书，自定义角色和开局，生成长短文选择等功能</p>
           </section>
         </div>
         <button onClick={onStart} className="btn-start">

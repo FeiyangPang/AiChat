@@ -1,16 +1,21 @@
 import React, { useState, useEffect } from 'react'
 import './ConfigModal.css'
-import { generateWorldBook } from '../utils/worldBookGenerator'
+import { generateWorldBook, optimizeWorldBook } from '../utils/worldBookGenerator'
 
 function ConfigModal({ type, isOpen, onClose, onSave, initialValue, apiKey, initialRoleDescription }) {
   const [value, setValue] = useState(initialValue || '')
   const [roleDescription, setRoleDescription] = useState(initialRoleDescription || '')
   const [isGenerating, setIsGenerating] = useState(false)
+  const [isOptimizing, setIsOptimizing] = useState(false)
+  const [optimizeInstruction, setOptimizeInstruction] = useState('')
+  const [showOptimizeInput, setShowOptimizeInput] = useState(false)
 
   useEffect(() => {
     if (isOpen) {
       setValue(initialValue || '')
       setRoleDescription(initialRoleDescription || '')
+      setOptimizeInstruction('')
+      setShowOptimizeInput(false)
     }
   }, [isOpen, initialValue, initialRoleDescription])
 
@@ -43,12 +48,40 @@ function ConfigModal({ type, isOpen, onClose, onSave, initialValue, apiKey, init
     }
     setIsGenerating(true)
     try {
-      const generated = await generateWorldBook(apiKey)
+      // 如果当前有输入内容，将其作为基础传递给生成函数
+      const userInput = value.trim() || ''
+      const generated = await generateWorldBook(apiKey, userInput)
       setValue(generated)
     } catch (error) {
       alert(`生成失败：${error.message || '未知错误'}`)
     } finally {
       setIsGenerating(false)
+    }
+  }
+
+  const handleOptimizeWorldBook = async () => {
+    if (!apiKey) {
+      alert('请先配置API密钥')
+      return
+    }
+    if (!value || !value.trim()) {
+      alert('请先输入或生成世界书内容')
+      return
+    }
+    if (!optimizeInstruction || !optimizeInstruction.trim()) {
+      alert('请输入优化指令')
+      return
+    }
+    setIsOptimizing(true)
+    try {
+      const optimized = await optimizeWorldBook(apiKey, value, optimizeInstruction)
+      setValue(optimized)
+      setOptimizeInstruction('')
+      setShowOptimizeInput(false)
+    } catch (error) {
+      alert(`优化失败：${error.message || '未知错误'}`)
+    } finally {
+      setIsOptimizing(false)
     }
   }
 
@@ -104,24 +137,57 @@ function ConfigModal({ type, isOpen, onClose, onSave, initialValue, apiKey, init
               <div className="worldbook-actions">
                 <label>世界书内容</label>
                 {apiKey && (
-                  <button
-                    onClick={handleGenerateWorldBook}
-                    disabled={isGenerating}
-                    className="btn-generate"
-                  >
-                    {isGenerating ? '生成中...' : 'AI生成世界书'}
-                  </button>
+                  <div className="worldbook-buttons">
+                    <button
+                      onClick={handleGenerateWorldBook}
+                      disabled={isGenerating || isOptimizing}
+                      className="btn-generate"
+                    >
+                      {isGenerating ? '生成中...' : 'AI生成世界书'}
+                    </button>
+                    <button
+                      onClick={() => setShowOptimizeInput(!showOptimizeInput)}
+                      disabled={isGenerating || isOptimizing || !value.trim()}
+                      className="btn-optimize"
+                    >
+                      {showOptimizeInput ? '取消优化' : 'AI优化世界书'}
+                    </button>
+                  </div>
                 )}
               </div>
+              {showOptimizeInput && apiKey && value.trim() && (
+                <div className="optimize-section">
+                  <label>优化指令</label>
+                  <textarea
+                    value={optimizeInstruction}
+                    onChange={(e) => setOptimizeInstruction(e.target.value)}
+                    placeholder="请输入优化指令，例如：&#10;- 添加更多角色设定&#10;- 扩展世界观描述&#10;- 优化文字表达&#10;- 添加魔法体系设定&#10;- 补充角色关系描述等"
+                    className="modal-textarea optimize-input"
+                    rows="4"
+                    disabled={isOptimizing}
+                  />
+                  <button
+                    onClick={handleOptimizeWorldBook}
+                    disabled={isOptimizing || !optimizeInstruction.trim()}
+                    className="btn-optimize-confirm"
+                  >
+                    {isOptimizing ? '优化中...' : '确认优化'}
+                  </button>
+                </div>
+              )}
               <textarea
                 value={value}
                 onChange={(e) => setValue(e.target.value)}
                 placeholder={getPlaceholder()}
                 className="modal-textarea"
                 rows="15"
+                disabled={isGenerating || isOptimizing}
               />
               {!apiKey && (
-                <p className="hint">提示：请先配置API密钥后，可以使用"AI生成世界书"功能</p>
+                <p className="hint">提示：请先配置API密钥后，可以使用"AI生成世界书"和"AI优化世界书"功能</p>
+              )}
+              {apiKey && value.trim() && !showOptimizeInput && (
+                <p className="hint">提示：如果当前有内容，AI生成世界书会基于现有内容进行扩展；点击"AI优化世界书"可以根据指令优化现有内容</p>
               )}
             </div>
           )}

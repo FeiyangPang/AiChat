@@ -5,7 +5,7 @@ function Introduction({ onStart }) {
   return (
     <div className="introduction">
       <div className="card">
-        <h1 className="title">角色扮演游戏 V 1.2</h1>
+        <h1 className="title">角色扮演游戏 V 1.4</h1>
         <div className="content">
           <section className="section">
             <h2>游戏介绍：</h2>
@@ -54,6 +54,8 @@ function Introduction({ onStart }) {
               <li><strong>V 1.0</strong> 发布完整的角色扮演游戏，含介绍，辅助编写世界书功能，自定义角色和开局功能，生成长短文选择功能</li>
               <li><strong>V 1.1</strong> 添加ai辅助编写用户扮演的角色功能 / 添加一个毫无意义的开屏动画</li>
               <li><strong>V 1.2</strong> 添加使用stable diffusion api的图片生成功能 （一键生成提示词）</li>
+              <li><strong>V 1.3</strong> 增加继续说功能</li>
+              <li><strong>V 1.4</strong> 增加对话模式</li>
             </ul>
           </section>
 

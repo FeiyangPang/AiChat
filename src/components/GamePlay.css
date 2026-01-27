@@ -742,6 +742,25 @@
   flex-wrap: wrap;
 }
 
+.target-role-input {
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  min-width: 150px;
+  transition: border-color 0.3s;
+}
+
+.target-role-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.target-role-input:disabled {
+  background: #f5f5f5;
+  cursor: not-allowed;
+}
+
 .mode-selector {
   display: flex;
   gap: 4px;

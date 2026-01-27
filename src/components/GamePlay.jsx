@@ -14,6 +14,7 @@ function GamePlay({ apiKey, worldBook, role, stableDiffusionApiKey, onApiChange,
   const [gameStarted, setGameStarted] = useState(false)
   const [customOpening, setCustomOpening] = useState('')
   const [showCustomOpening, setShowCustomOpening] = useState(false)
+  const [targetRole, setTargetRole] = useState('') // 对话模式的目标角色
   const messagesEndRef = useRef(null)
   const abortControllerRef = useRef(null)
   
@@ -250,7 +251,89 @@ ${roleInfo}
   }
 
   const handleSendMessage = async () => {
-    if (!input.trim() || isLoading || !gameStarted) return
+    if (isLoading || !gameStarted) return
+
+    // 对话模式下，如果输入为空，触发"继续说"功能
+    if (messageMode === 'dialogue' && !input.trim()) {
+      if (!targetRole || !targetRole.trim()) {
+        alert('对话模式下请先设置目标角色')
+        return
+      }
+      // 继续说功能
+      setIsLoading(true)
+      const abortController = new AbortController()
+      abortControllerRef.current = abortController
+
+      try {
+        const nsfwPrompt = generateJailbreakPrompt()
+        const recentHistory = messages.slice(-10).map(msg => ({
+          role: msg.role,
+          content: msg.content
+        }))
+
+        let roleInfo = `玩家正在扮演角色：${currentRole.name}`
+        if (currentRole.description && currentRole.description.trim()) {
+          roleInfo += `\n\n玩家角色详细描述：\n${currentRole.description}`
+        }
+        roleInfo += `\n\n对话目标角色：${targetRole}`
+
+        const systemPrompt = `${nsfwPrompt}
+
+你是角色扮演游戏中的目标角色（${targetRole}），负责与玩家角色进行实时对话。
+
+${roleInfo}
+
+世界设定：
+${currentWorldBook.substring(0, 2000)}
+
+【对话模式 - 继续说功能】：
+用户没有输入新内容，要求你按照之前的对话逻辑和剧情发展，继续说下去。
+
+要求：
+1. 以目标角色（${targetRole}）的第一人称视角继续说2-3句话
+2. 延续之前的对话逻辑和剧情发展
+3. 可以主动推进对话，编造后续的剧情发展
+4. 回复要符合目标角色的性格、身份、关系等设定
+5. 使用第一人称，直接说出角色要说的话
+6. 可以包含少量动作、表情、语气描述
+7. 回复长度：2-3句话左右（约50-200字）
+8. 【重要】这是对话模式，不是故事模式！只能以第一人称说话，不能进行第三人称叙述！
+
+重要：直接输出目标角色要说的话，不要有任何推理过程。必须完成完整的回应，不要中途停止。`
+
+        const response = await callDeepseekAPI(
+          currentApiKey,
+          systemPrompt,
+          true,
+          recentHistory,
+          2000,
+          abortController
+        )
+
+        if (!response || response.trim().length === 0) {
+          throw new Error('AI返回空内容')
+        }
+
+        setMessages(prev => [...prev, { role: 'assistant', content: response }])
+      } catch (error) {
+        if (error.message === '请求已取消') {
+          setIsLoading(false)
+          return
+        }
+        console.error('继续说失败:', error)
+        setMessages(prev => [...prev, { 
+          role: 'assistant', 
+          content: `❌ 继续说失败：${error.message || '未知错误'}` 
+        }])
+      } finally {
+        setIsLoading(false)
+        abortControllerRef.current = null
+      }
+      return
+    }
+
+    // 原有逻辑：必须有输入内容
+    if (!input.trim()) return
 
     const userMessage = input.trim()
     setInput('')
@@ -271,6 +354,85 @@ ${roleInfo}
         content: msg.content
       }))
 
+      // 对话模式
+      if (messageMode === 'dialogue') {
+        if (!targetRole || !targetRole.trim()) {
+          alert('对话模式下请先设置目标角色')
+          setIsLoading(false)
+          setInput(userMessage) // 恢复输入
+          return
+        }
+
+        let roleInfo = `玩家正在扮演角色：${currentRole.name}`
+        if (currentRole.description && currentRole.description.trim()) {
+          roleInfo += `\n\n玩家角色详细描述：\n${currentRole.description}`
+        }
+
+        roleInfo += `\n\n对话目标角色：${targetRole}`
+
+        const systemPrompt = `${nsfwPrompt}
+
+你是角色扮演游戏中的目标角色（${targetRole}），负责与玩家角色进行实时对话。
+
+${roleInfo}
+
+世界设定：
+${currentWorldBook.substring(0, 2000)}
+
+【对话模式 - 重要区别】：
+这是对话模式，不是故事叙述模式！你只能以目标角色（${targetRole}）的视角说话，不能进行第三人称的故事叙述。
+
+【对话模式要求】：
+1. 必须使用全中文输出
+2. 用户输入可能是以下两种类型：
+   a) 玩家角色说的话（直接对话，通常用引号、冒号或第一人称）
+   b) 旁白信息（场景描述、动作描述等，通常没有引号，是第三人称叙述）
+
+3. 如果用户输入的是玩家角色说的话（包含引号、冒号、第一人称"我"等），你需要：
+   - 以目标角色（${targetRole}）的第一人称视角回应
+   - 直接说出目标角色要说的话，使用引号或第一人称
+   - 可以加上少量动作、表情、语气描述，但主要是对话内容
+   - 回应要符合目标角色的性格、身份、关系等设定
+   - 回应要自然、真实、符合对话逻辑
+   - 格式示例："..." 或 我说："..." 或 我（动作描述）说："..."
+   - 【重要】回复长度：2-3句话左右（约50-200字），不要长篇大论
+
+4. 如果用户输入的是旁白信息（场景描述、动作等，没有引号），你需要：
+   - 以目标角色（${targetRole}）的第一人称视角，描述你看到、感受到的情况
+   - 或者直接说出目标角色在这种情况下会说的话
+   - 格式：使用第一人称"我"，如："我..." 或 我说："..."
+   - 【重要】不要使用第三人称叙述，不要像写故事那样描述，只能以角色视角说话或描述感受
+   - 回复长度：2-3句话左右（约50-200字）
+
+5. 严格遵循世界书设定和角色设定
+6. 保持对话的连贯性和自然性
+7. 【最重要】这是对话模式，不是故事模式！你只能以目标角色的第一人称视角说话，不能进行第三人称的故事叙述！回复要简短，就是角色说2-3句话，不要像长文/短文模式那样编写故事！
+
+重要：直接输出目标角色要说的话或第一人称描述，不要有任何推理过程。不要使用第三人称叙述，不要像写故事那样。必须完成完整的回应，不要中途停止。`
+
+        const response = await callDeepseekAPI(
+          currentApiKey,
+          systemPrompt,
+          true,
+          [
+            ...recentHistory,
+            { role: 'user', content: userMessage }
+          ],
+          3000,
+          abortController
+        )
+
+        if (!response || response.trim().length === 0) {
+          throw new Error('AI返回空内容')
+        }
+
+        setMessages(prev => [...prev, { role: 'assistant', content: response }])
+        setIsLoading(false)
+        abortControllerRef.current = null
+        return
+      }
+
+      // 原有的短文/长文模式
       const lengthPrompt = messageMode === 'short' 
         ? '【快问快答模式】回复要求：快速、简短、完整。优先控制在约500字左右（按中文字符计算），但如果需要完整叙述完用户指令的所有内容，即使字数超过500字也必须说完。绝不能因为字数限制而省略、截断或遗漏任何重要情节。以快答为前提，但完整性是第一优先级。'
         : '回复长度优先控制在约2000字左右（按中文字符计算），但【最重要】必须完整叙述完用户指令中的所有内容，即使字数超过2000字也必须说完。绝不能因为字数限制而省略、截断、遗漏任何重要情节或中途停止。完整性是第一优先级，字数控制是第二优先级。'
@@ -320,7 +482,7 @@ ${messageMode === 'short' ? `要求（快问快答模式）：
           ...recentHistory,
           { role: 'user', content: userMessage }
         ],
-        messageMode === 'short' ? 2000 : 4000, // 短文模式增加token限制，确保即使超字数也能说完
+        messageMode === 'short' ? 2000 : messageMode === 'dialogue' ? 3000 : 4000, // 短文模式增加token限制，确保即使超字数也能说完
         abortController
       )
 
@@ -537,7 +699,7 @@ ${messageMode === 'short' ? `要求（快问快答模式）：
                       handleSendMessage()
                     }
                   }}
-                  placeholder="输入您的指令或行动..."
+                  placeholder={messageMode === 'dialogue' ? '输入角色说的话或旁白信息（留空点击发送可让角色继续说）...' : '输入您的指令或行动...'}
                   className="message-input"
                   rows="3"
                 />
@@ -565,7 +727,28 @@ ${messageMode === 'short' ? `要求（快问快答模式）：
                       />
                       <span>长文</span>
                     </label>
+                    <label className="mode-option">
+                      <input
+                        type="radio"
+                        name="messageMode"
+                        value="dialogue"
+                        checked={messageMode === 'dialogue'}
+                        onChange={(e) => setMessageMode(e.target.value)}
+                        disabled={isLoading}
+                      />
+                      <span>对话</span>
+                    </label>
                   </div>
+                  {messageMode === 'dialogue' && (
+                    <input
+                      type="text"
+                      value={targetRole}
+                      onChange={(e) => setTargetRole(e.target.value)}
+                      placeholder="目标角色名称"
+                      className="target-role-input"
+                      disabled={isLoading}
+                    />
+                  )}
                   {isLoading && (
                     <button onClick={handleAbort} className="send-btn abort-btn">
                       ⏹️ 打断
@@ -574,9 +757,9 @@ ${messageMode === 'short' ? `要求（快问快答模式）：
                   <button 
                     onClick={handleSendMessage} 
                     className="send-btn"
-                    disabled={isLoading || !input.trim()}
+                    disabled={isLoading || (messageMode !== 'dialogue' && !input.trim())}
                   >
-                    {messageMode === 'short' ? '短文' : '长文'}
+                    {messageMode === 'short' ? '短文' : messageMode === 'long' ? '长文' : input.trim() ? '发送' : '继续说'}
                   </button>
                 </div>
               </div>

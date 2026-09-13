@@ -13,6 +13,7 @@ dist-ssr
 *.local
 
 # Editor directories and files
+.cursor/
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -22,6 +23,12 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local credentials and verification artifacts
+.env
+.env.*
+!.env.example
+.scroll-qa.*
 
 
 

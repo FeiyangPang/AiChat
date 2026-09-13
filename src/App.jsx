@@ -1,35 +1,27 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import './App.css'
 import Introduction from './components/Introduction'
 import GamePlay from './components/GamePlay'
 import ErrorBoundary from './components/ErrorBoundary'
 import SplashScreen from './components/SplashScreen'
+import { loadLLMSettings, saveLLMSettings } from './utils/llm/providers'
+import { loadGameSession } from './utils/game-session'
 
 function App() {
   const [showSplash, setShowSplash] = useState(true)
-  const [showIntroduction, setShowIntroduction] = useState(true)
-  const [apiKey, setApiKey] = useState('')
-  const [worldBook, setWorldBook] = useState('')
-  const [selectedRole, setSelectedRole] = useState({ name: '', description: '' })
-  const [stableDiffusionApiKey, setStableDiffusionApiKey] = useState('')
-
-  useEffect(() => {
-    try {
-      if (localStorage.getItem('deepseek_api_key')) {
-        localStorage.removeItem('deepseek_api_key')
-      }
-    } catch (error) {
-      console.error('清除localStorage失败:', error)
-    }
-  }, [])
+  const [savedSession] = useState(() => loadGameSession())
+  const [showIntroduction, setShowIntroduction] = useState(!savedSession?.gameStarted)
+  const [llmSettings, setLlmSettings] = useState(() => loadLLMSettings())
+  const [worldBook, setWorldBook] = useState(savedSession?.worldBook || '')
+  const [selectedRole, setSelectedRole] = useState(savedSession?.role || { name: '', description: '' })
 
   const handleStart = () => {
     setShowIntroduction(false)
   }
 
-  const handleApiChange = (key) => {
-    const trimmedKey = key.trim()
-    setApiKey(trimmedKey)
+  const handleApiChange = (settings) => {
+    setLlmSettings(settings)
+    saveLLMSettings(settings)
   }
 
   const handleWorldBookChange = (newWorldBook) => {
@@ -57,14 +49,12 @@ function App() {
           <Introduction onStart={handleStart} />
         ) : (
           <GamePlay
-            apiKey={apiKey}
+            llmSettings={llmSettings}
             worldBook={worldBook}
             role={selectedRole}
-            stableDiffusionApiKey={stableDiffusionApiKey}
             onApiChange={handleApiChange}
             onWorldBookChange={handleWorldBookChange}
             onRoleChange={handleRoleChange}
-            onStableDiffusionApiChange={setStableDiffusionApiKey}
           />
         )}
       </ErrorBoundary>

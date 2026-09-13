@@ -1,922 +1,280 @@
 import React, { useState, useRef, useEffect } from 'react'
 import './GamePlay.css'
 import ConfigModal from './ConfigModal'
+import MemoryTablePanel from './MemoryTablePanel'
+import StatusBar from './StatusBar'
 import { callDeepseekAPI } from '../utils/api'
-import { generateJailbreakPrompt } from '../utils/jailbreakPrompt'
-import { generateImageWithStabilityAI } from '../utils/imageGenerator'
+import { getMemoryStore } from '../utils/memory/memory-store'
+import { getStatusStore } from '../utils/memory/status-store'
+import { captureTurnState, restoreTurnState, applyTurnResponse } from '../utils/memory/turn-state'
+import { buildStoryPrompt } from '../utils/story-prompt'
+import { loadGameSession, saveGameSession } from '../utils/game-session'
+import { generateWorldBookAndOpening } from '../utils/worldBookGenerator'
+import { getActiveLLMConfig } from '../utils/llm/providers'
 
-function GamePlay({ apiKey, worldBook, role, stableDiffusionApiKey, onApiChange, onWorldBookChange, onRoleChange, onStableDiffusionApiChange }) {
-  const [messages, setMessages] = useState([])
+function GamePlay({ llmSettings, worldBook, role, onApiChange, onWorldBookChange, onRoleChange }) {
+  const [initialSession] = useState(() => loadGameSession())
+  const [messages, setMessages] = useState(() => initialSession?.messages || [])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [messageMode, setMessageMode] = useState('long')
+  const [messageMode, setMessageMode] = useState(initialSession?.messageMode || 'long')
   const [configModal, setConfigModal] = useState({ type: null, isOpen: false })
-  const [gameStarted, setGameStarted] = useState(false)
+  const [gameStarted, setGameStarted] = useState(Boolean(initialSession?.gameStarted))
   const [customOpening, setCustomOpening] = useState('')
   const [showCustomOpening, setShowCustomOpening] = useState(false)
-  const [targetRole, setTargetRole] = useState('') // 对话模式的目标角色
-  const messagesEndRef = useRef(null)
+  const [targetRole, setTargetRole] = useState(initialSession?.targetRole || '')
+  const [showStoryToWorldBook, setShowStoryToWorldBook] = useState(false)
+  const [userStory, setUserStory] = useState('')
+  const [isGeneratingWorldBookAndOpening, setIsGeneratingWorldBookAndOpening] = useState(false)
+  const [worldBookProgress, setWorldBookProgress] = useState('')
+  const [notice, setNotice] = useState('')
+  const [memoryRevision, setMemoryRevision] = useState(0)
+  const messagesContainerRef = useRef(null)
+  const followLatestRef = useRef(true)
   const abortControllerRef = useRef(null)
-  
-  // 图片生成相关状态
-  const [imagePrompt, setImagePrompt] = useState('')
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false)
-  const [generatedImages, setGeneratedImages] = useState([])
-  const [numImages, setNumImages] = useState(1)
-  
-  // 图片查看器状态
-  const [viewerImage, setViewerImage] = useState(null)
-  const [imageScale, setImageScale] = useState(1)
-  const [imagePosition, setImagePosition] = useState({ x: 0, y: 0 })
-  const [isDragging, setIsDragging] = useState(false)
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 })
-
-  const currentApiKey = apiKey || ''
+  const busyRef = useRef(false)
+  const [memoryStore] = useState(() => getMemoryStore())
+  const [statusStore] = useState(() => getStatusStore())
+  const [showMemoryPanel, setShowMemoryPanel] = useState(false)
+  const currentLLMConfig = getActiveLLMConfig(llmSettings)
+  const currentApiKey = currentLLMConfig.apiKey || ''
   const currentWorldBook = worldBook || ''
   const currentRole = typeof role === 'string' ? { name: role, description: '' } : (role || { name: '', description: '' })
+  const canStart = currentApiKey && currentWorldBook.trim() && currentRole.name.trim()
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (initialSession?.snapshot) {
+      try { restoreTurnState(initialSession.snapshot, memoryStore, statusStore) }
+      catch (error) { setNotice(error.message) }
+    }
+    return () => abortControllerRef.current?.abort()
+  }, [])
+
+  const sessionData = () => ({
+    messages, gameStarted, worldBook: currentWorldBook, role: currentRole,
+    messageMode, targetRole, snapshot: captureTurnState(memoryStore, statusStore),
+  })
+  useEffect(() => {
+    if (!saveGameSession(sessionData())) setNotice('浏览器存储空间不足，当前进度尚未保存；请导出存档。')
+  }, [messages, gameStarted, worldBook, role, messageMode, targetRole, memoryRevision])
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (container && followLatestRef.current) container.scrollTop = container.scrollHeight
   }, [messages])
 
-  const openConfigModal = (type) => {
-    setConfigModal({ type, isOpen: true })
+  const handleMessagesScroll = event => {
+    const container = event.currentTarget
+    followLatestRef.current = container.scrollHeight - container.clientHeight - container.scrollTop < 80
   }
 
-  const handleGenerateImage = async () => {
-    if (!stableDiffusionApiKey || !stableDiffusionApiKey.trim()) {
-      alert('请先配置Stable Diffusion API密钥')
-      return
-    }
-
-    if (!currentApiKey || !currentApiKey.trim()) {
-      alert('请先配置Deepseek API密钥，用于转换提示词')
-      return
-    }
-
-    if (!imagePrompt || !imagePrompt.trim()) {
-      alert('请输入图片描述')
-      return
-    }
-
-    setIsGeneratingImage(true)
-    setGeneratedImages([])
-    
-    try {
-      // 第一步：使用 Deepseek API 将用户的大白话转换为专业的 AI 提示词
-      const promptTranslationPrompt = `你是一个专业的AI图片生成提示词专家。请将用户提供的自然语言描述转换为专业的Stable Diffusion图片生成提示词。
-
-用户描述：
-${imagePrompt.trim()}
-
-要求：
-1. 将用户的中文或英文描述转换为专业的英文提示词（prompt）
-2. 提示词应该详细、具体，包含场景、风格、细节、质量等关键词
-3. 使用逗号分隔关键词，格式如：detailed, high quality, epic scene, fantasy, cinematic lighting
-4. 如果用户描述的是中文，需要理解其含义并转换为对应的英文专业术语
-5. 提示词应该能够准确表达用户的意图，同时符合Stable Diffusion的最佳实践
-6. 只输出转换后的英文提示词，不要输出任何解释、说明或其他内容
-7. 提示词长度控制在200个单词以内
-
-请直接输出转换后的专业提示词：`
-
-      const translatedPrompt = await callDeepseekAPI(
-        currentApiKey,
-        promptTranslationPrompt,
-        false,
-        [],
-        500
-      )
-
-      if (!translatedPrompt || !translatedPrompt.trim()) {
-        throw new Error('提示词转换失败')
-      }
-
-      // 使用转换后的提示词替换用户输入
-      const finalPrompt = translatedPrompt.trim()
-      setImagePrompt(finalPrompt)
-
-      // 第二步：使用转换后的提示词调用 Stable Diffusion API 生成图片
-      const images = await generateImageWithStabilityAI(
-        stableDiffusionApiKey,
-        finalPrompt,
-        {
-          width: 1024,
-          height: 1024,
-          style: 'enhance',
-          numImages: numImages
-        }
-      )
-      setGeneratedImages(images)
-    } catch (error) {
-      alert(`生成图片失败：${error.message || '未知错误'}`)
-    } finally {
-      setIsGeneratingImage(false)
-    }
-  }
-
-  const closeConfigModal = () => {
-    setConfigModal({ type: null, isOpen: false })
-  }
-
+  const openConfigModal = type => setConfigModal({ type, isOpen: true })
+  const closeConfigModal = () => setConfigModal({ type: null, isOpen: false })
   const handleConfigSave = (type, value) => {
-    switch (type) {
-      case 'api':
-        onApiChange(value)
-        break
-      case 'worldbook':
-        onWorldBookChange(value)
-        break
-      case 'role':
-        onRoleChange(value)
-        break
-      case 'stable-diffusion-api':
-        onStableDiffusionApiChange(value)
-        break
-    }
+    if (type === 'api') onApiChange(value)
+    if (type === 'worldbook') onWorldBookChange(value)
+    if (type === 'role') onRoleChange(value)
   }
+  const getConfigValue = type => type === 'api' ? llmSettings : type === 'worldbook' ? currentWorldBook : currentRole.name
+  const getRoleDescription = () => currentRole.description || ''
 
-  const getConfigValue = (type) => {
-    switch (type) {
-      case 'api':
-        return currentApiKey
-      case 'worldbook':
-        return currentWorldBook
-      case 'role':
-        return currentRole.name
-      case 'stable-diffusion-api':
-        return stableDiffusionApiKey || ''
-      default:
-        return ''
-    }
-  }
-
-  const getRoleDescription = () => {
-    return currentRole.description || ''
-  }
-
-  const canStart = currentApiKey && currentWorldBook && currentRole.name
-
-  const generateInitialStory = async (customOpeningText = null) => {
-    if (!currentApiKey) {
-      throw new Error('API密钥未设置')
-    }
-    if (!currentWorldBook) {
-      throw new Error('世界书未设置')
-    }
-    if (!currentRole.name) {
-      throw new Error('角色未选择')
-    }
-
-    const nsfwPrompt = generateJailbreakPrompt()
-    
-    let roleInfo = `玩家角色：${currentRole.name}`
-    if (currentRole.description && currentRole.description.trim()) {
-      roleInfo += `\n\n角色详细描述：\n${currentRole.description}`
-    }
-
-    let prompt = ''
-    if (customOpeningText && customOpeningText.trim()) {
-      prompt = `${nsfwPrompt}
-
-你是一个专业的角色扮演游戏主持人。基于以下信息生成初始剧情：
-
-世界书：
-${currentWorldBook}
-
-${roleInfo}
-
-玩家自定义的开局描述：
-${customOpeningText}
-
-请根据玩家自定义的开局描述，结合世界书和角色设定，生成一个完整、详细的初始剧情（优先控制在约2000字，按中文字符计算）。要求：
-1. 必须完全包含玩家描述的所有元素和场景
-2. 在玩家描述的基础上，进行详细的扩展和补充
-3. 详细描写场景、动作、心理、环境等各个方面
-4. 让玩家描述的开头场景变得生动、完整、引人入胜
-5. 必须使用全中文输出
-6. 必须使用第三人称视角进行长叙述
-7. 严格遵循世界书设定和角色设定
-8. 让玩家有代入感
-9. 为后续互动留下空间
-10. 【最重要】必须完成完整的描述，绝不能中途停止或截断。即使字数超过2000字，也必须把整个场景、事件完整叙述完毕。完整性是第一优先级，字数控制是第二优先级。`
-    } else {
-      prompt = `${nsfwPrompt}
-
-你是一个专业的角色扮演游戏主持人。基于以下信息生成初始剧情：
-
-世界书：
-${currentWorldBook}
-
-${roleInfo}
-
-请生成一段引人入胜的初始剧情（优先控制在约2000字，按中文字符计算），让玩家进入这个虚拟世界。要求：
-1. 必须使用全中文输出
-2. 必须使用第三人称视角进行长叙述
-3. 详细描写场景、动作、心理、环境等
-4. 严格遵循世界书设定和角色设定
-5. 让玩家有代入感
-6. 为后续互动留下空间
-7. 【最重要】必须完成完整的描述，绝不能中途停止或截断。即使字数超过2000字，也必须把整个场景、事件完整叙述完毕。完整性是第一优先级，字数控制是第二优先级。`
-    }
-
-    prompt += `\n\n【最重要】必须完成完整的描述，绝不能中途停止或截断。即使字数超过2000字，也必须把整个事件、场景、动作完整叙述完毕。完整性是第一优先级，字数控制是第二优先级。如果描述到一半就停止，这是严重错误。
-
-重要：直接输出故事内容，不要有任何推理过程、思考过程、分析过程等元内容。不要输出"根据..."、"考虑到..."、"我认为..."等推理性语言。直接开始叙述。必须完整叙述完所有内容，不要中途停止。`
-
-    const response = await callDeepseekAPI(currentApiKey, prompt, true, [], 4000)
-    if (!response || response.trim().length === 0) {
-      throw new Error('API返回空内容')
-    }
-    return response
-  }
-
-  const handleStart = async () => {
-    if (!canStart) {
-      alert('请先完成所有配置：API密钥、世界书、角色选择')
-      return
-    }
-
-    setIsLoading(true)
+  const handleGenerateWorldBookAndOpening = async () => {
+    if (busyRef.current || !userStory.trim()) return
+    if (!currentApiKey) { setNotice('请先配置 DeepSeek API Key'); return }
+    busyRef.current = true
+    setIsGeneratingWorldBookAndOpening(true)
+    setNotice('')
+    const controller = new AbortController()
+    abortControllerRef.current = controller
     try {
-      const openingText = showCustomOpening && customOpening.trim() ? customOpening.trim() : null
-      const initialMessage = await generateInitialStory(openingText)
-      setMessages([{ role: 'assistant', content: initialMessage }])
+      const result = await generateWorldBookAndOpening(currentLLMConfig, userStory, {
+        signal: controller.signal,
+        onProgress: p => setWorldBookProgress(`${p.step}/${p.total} ${p.message}`),
+      })
+      if (controller.signal.aborted) return
+      onWorldBookChange(result.worldBook)
+      setCustomOpening(result.opening)
+      setShowCustomOpening(true)
+      setShowStoryToWorldBook(false)
+      setNotice('世界书和开头已填入，可以检查后开始游戏。')
+    } catch (error) { setNotice(error.message || '生成失败') }
+    finally {
+      busyRef.current = false
+      setIsGeneratingWorldBookAndOpening(false)
+      setWorldBookProgress('')
+      abortControllerRef.current = null
+    }
+  }
+
+  const runTurn = async ({ opening = false, userText = '' } = {}) => {
+    if (busyRef.current) return
+    busyRef.current = true
+    setIsLoading(true)
+    setNotice('')
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+    try {
+      const mode = opening ? 'long' : messageMode
+      const mem = buildStoryPrompt({ worldBook: currentWorldBook, role: currentRole, mode,
+        targetRole, opening, memoryStore, statusStore, query: userText })
+      const history = opening ? [] : messages.slice(-16).map(({ role, content }) => ({ role, content }))
+      const command = opening
+        ? (userText || '请根据世界书生成可互动的第一幕。')
+        : (userText || '请承接上一句继续说，玩家尚未作出新行动。')
+      const response = await callDeepseekAPI(currentLLMConfig, mem.prompt, false,
+        [...history, { role: 'user', content: command }], mode === 'long' ? 10000 : 7000, controller)
+      if (controller.signal.aborted) return
+      const turnId = crypto.randomUUID()
+      const reply = applyTurnResponse({ response, memoryStore, statusStore, turnId,
+        rowIndexMap: mem.plan.rowIndexMap, tableOrder: mem.tableOrder })
+      reply.undoMessageCount = messages.length
+      const nextMessages = opening ? [reply] : [...messages,
+        ...(userText ? [{ id: `${turnId}_user`, role: 'user', content: userText }] : []), reply]
+      const saved = saveGameSession({ ...sessionData(), messages: nextMessages,
+        gameStarted: true, snapshot: captureTurnState(memoryStore, statusStore) })
+      if (!saved) setNotice('本轮已生成，但浏览器空间不足，尚未保存；请导出存档。')
+      setMessages(nextMessages)
       setGameStarted(true)
+      setInput('')
     } catch (error) {
-      alert(`生成开场白失败：${error.message || '未知错误'}`)
+      // Failed/cancelled requests never append fictional events or alter chat history.
+      setNotice(error.message || '生成失败，请重试')
     } finally {
+      busyRef.current = false
       setIsLoading(false)
+      abortControllerRef.current = null
     }
   }
-
-  const handleSendMessage = async () => {
-    if (isLoading || !gameStarted) return
-
-    // 对话模式下，如果输入为空，触发"继续说"功能
-    if (messageMode === 'dialogue' && !input.trim()) {
-      if (!targetRole || !targetRole.trim()) {
-        alert('对话模式下请先设置目标角色')
-        return
-      }
-      // 继续说功能
-      setIsLoading(true)
-      const abortController = new AbortController()
-      abortControllerRef.current = abortController
-
-      try {
-        const nsfwPrompt = generateJailbreakPrompt()
-        const recentHistory = messages.slice(-10).map(msg => ({
-          role: msg.role,
-          content: msg.content
-        }))
-
-        let roleInfo = `玩家正在扮演角色：${currentRole.name}`
-        if (currentRole.description && currentRole.description.trim()) {
-          roleInfo += `\n\n玩家角色详细描述：\n${currentRole.description}`
-        }
-        roleInfo += `\n\n对话目标角色：${targetRole}`
-
-        const systemPrompt = `${nsfwPrompt}
-
-你是角色扮演游戏中的目标角色（${targetRole}），负责与玩家角色进行实时对话。
-
-${roleInfo}
-
-世界设定：
-${currentWorldBook.substring(0, 2000)}
-
-【对话模式 - 继续说功能】：
-用户没有输入新内容，要求你按照之前的对话逻辑和剧情发展，继续说下去。
-
-要求：
-1. 以目标角色（${targetRole}）的第一人称视角继续说2-3句话
-2. 延续之前的对话逻辑和剧情发展
-3. 可以主动推进对话，编造后续的剧情发展
-4. 回复要符合目标角色的性格、身份、关系等设定
-5. 使用第一人称，直接说出角色要说的话
-6. 可以包含少量动作、表情、语气描述
-7. 回复长度：2-3句话左右（约50-200字）
-8. 【重要】这是对话模式，不是故事模式！只能以第一人称说话，不能进行第三人称叙述！
-
-重要：直接输出目标角色要说的话，不要有任何推理过程。必须完成完整的回应，不要中途停止。`
-
-        const response = await callDeepseekAPI(
-          currentApiKey,
-          systemPrompt,
-          true,
-          recentHistory,
-          2000,
-          abortController
-        )
-
-        if (!response || response.trim().length === 0) {
-          throw new Error('AI返回空内容')
-        }
-
-        setMessages(prev => [...prev, { role: 'assistant', content: response }])
-      } catch (error) {
-        if (error.message === '请求已取消') {
-          setIsLoading(false)
-          return
-        }
-        console.error('继续说失败:', error)
-        setMessages(prev => [...prev, { 
-          role: 'assistant', 
-          content: `❌ 继续说失败：${error.message || '未知错误'}` 
-        }])
-      } finally {
-        setIsLoading(false)
-        abortControllerRef.current = null
-      }
-      return
-    }
-
-    // 原有逻辑：必须有输入内容
-    if (!input.trim()) return
-
-    const userMessage = input.trim()
-    setInput('')
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }])
-    setIsLoading(true)
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-    }
-
-    const abortController = new AbortController()
-    abortControllerRef.current = abortController
-
+  const handleStart = () => {
+    if (!canStart) { setNotice('请先配置 DeepSeek API、世界书和玩家角色'); return }
+    return runTurn({ opening: true, userText: showCustomOpening ? customOpening.trim() : '' })
+  }
+  const handleSendMessage = () => {
+    if (!gameStarted || busyRef.current) return
+    if (messageMode === 'dialogue' && !targetRole.trim()) { setNotice('请先填写对话目标角色'); return }
+    if (messageMode !== 'dialogue' && !input.trim()) return
+    return runTurn({ userText: input.trim() })
+  }
+  const handleAbort = () => abortControllerRef.current?.abort()
+  const canUndo = () => !isLoading && messages.length > 1 && Boolean(messages.at(-1)?.before)
+  const handleUndo = () => {
+    if (!canUndo()) return
+    const reply = messages.at(-1)
+    const previous = captureTurnState(memoryStore, statusStore)
     try {
-      const nsfwPrompt = generateJailbreakPrompt()
-      const recentHistory = messages.slice(-10).map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }))
-
-      // 对话模式
-      if (messageMode === 'dialogue') {
-        if (!targetRole || !targetRole.trim()) {
-          alert('对话模式下请先设置目标角色')
-          setIsLoading(false)
-          setInput(userMessage) // 恢复输入
-          return
-        }
-
-        let roleInfo = `玩家正在扮演角色：${currentRole.name}`
-        if (currentRole.description && currentRole.description.trim()) {
-          roleInfo += `\n\n玩家角色详细描述：\n${currentRole.description}`
-        }
-
-        roleInfo += `\n\n对话目标角色：${targetRole}`
-
-        const systemPrompt = `${nsfwPrompt}
-
-你是角色扮演游戏中的目标角色（${targetRole}），负责与玩家角色进行实时对话。
-
-${roleInfo}
-
-世界设定：
-${currentWorldBook.substring(0, 2000)}
-
-【对话模式 - 重要区别】：
-这是对话模式，不是故事叙述模式！你只能以目标角色（${targetRole}）的视角说话，不能进行第三人称的故事叙述。
-
-【对话模式要求】：
-1. 必须使用全中文输出
-2. 用户输入可能是以下两种类型：
-   a) 玩家角色说的话（直接对话，通常用引号、冒号或第一人称）
-   b) 旁白信息（场景描述、动作描述等，通常没有引号，是第三人称叙述）
-
-3. 如果用户输入的是玩家角色说的话（包含引号、冒号、第一人称"我"等），你需要：
-   - 以目标角色（${targetRole}）的第一人称视角回应
-   - 直接说出目标角色要说的话，使用引号或第一人称
-   - 可以加上少量动作、表情、语气描述，但主要是对话内容
-   - 回应要符合目标角色的性格、身份、关系等设定
-   - 回应要自然、真实、符合对话逻辑
-   - 格式示例："..." 或 我说："..." 或 我（动作描述）说："..."
-   - 【重要】回复长度：2-3句话左右（约50-200字），不要长篇大论
-
-4. 如果用户输入的是旁白信息（场景描述、动作等，没有引号），你需要：
-   - 以目标角色（${targetRole}）的第一人称视角，描述你看到、感受到的情况
-   - 或者直接说出目标角色在这种情况下会说的话
-   - 格式：使用第一人称"我"，如："我..." 或 我说："..."
-   - 【重要】不要使用第三人称叙述，不要像写故事那样描述，只能以角色视角说话或描述感受
-   - 回复长度：2-3句话左右（约50-200字）
-
-5. 严格遵循世界书设定和角色设定
-6. 保持对话的连贯性和自然性
-7. 【最重要】这是对话模式，不是故事模式！你只能以目标角色的第一人称视角说话，不能进行第三人称的故事叙述！回复要简短，就是角色说2-3句话，不要像长文/短文模式那样编写故事！
-
-重要：直接输出目标角色要说的话或第一人称描述，不要有任何推理过程。不要使用第三人称叙述，不要像写故事那样。必须完成完整的回应，不要中途停止。`
-
-        const response = await callDeepseekAPI(
-          currentApiKey,
-          systemPrompt,
-          true,
-          [
-            ...recentHistory,
-            { role: 'user', content: userMessage }
-          ],
-          3000,
-          abortController
-        )
-
-        if (!response || response.trim().length === 0) {
-          throw new Error('AI返回空内容')
-        }
-
-        setMessages(prev => [...prev, { role: 'assistant', content: response }])
-        setIsLoading(false)
-        abortControllerRef.current = null
-        return
+      restoreTurnState(reply.before, memoryStore, statusStore)
+      const next = messages.slice(0, reply.undoMessageCount)
+      if (!saveGameSession({ ...sessionData(), messages: next, snapshot: reply.before })) {
+        restoreTurnState(previous, memoryStore, statusStore)
+        throw new Error('存档保存失败，尚未撤回')
       }
-
-      // 原有的短文/长文模式
-      const lengthPrompt = messageMode === 'short' 
-        ? '【快问快答模式】回复要求：快速、简短、完整。优先控制在约500字左右（按中文字符计算），但如果需要完整叙述完用户指令的所有内容，即使字数超过500字也必须说完。绝不能因为字数限制而省略、截断或遗漏任何重要情节。以快答为前提，但完整性是第一优先级。'
-        : '回复长度优先控制在约2000字左右（按中文字符计算），但【最重要】必须完整叙述完用户指令中的所有内容，即使字数超过2000字也必须说完。绝不能因为字数限制而省略、截断、遗漏任何重要情节或中途停止。完整性是第一优先级，字数控制是第二优先级。'
-
-      let roleInfo = `玩家正在扮演角色：${currentRole.name}`
-      if (currentRole.description && currentRole.description.trim()) {
-        roleInfo += `\n\n角色详细描述：\n${currentRole.description}`
+      const userMessage = messages[reply.undoMessageCount]
+      if (userMessage?.role === 'user') setInput(userMessage.content)
+      setMessages(next)
+      setNotice('已撤回上一轮，状态、角色记录和分层记忆同步恢复。')
+    } catch (error) { setNotice(error.message) }
+  }
+  const handleExport = () => {
+    const blob = new Blob([JSON.stringify({ ...sessionData(), version: 1 }, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `角色扮演存档-${new Date().toISOString().slice(0, 10)}.json`
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+  const handleNewGame = () => {
+    if (busyRef.current || !confirm('开始新游戏会清空本局聊天和记忆。需要保留时请先导出存档。继续吗？')) return
+    const snapshot = captureTurnState(memoryStore, statusStore)
+    try {
+      restoreTurnState({ rows: [], status: {} }, memoryStore, statusStore)
+      if (!saveGameSession({ ...sessionData(), messages: [], gameStarted: false,
+        snapshot: captureTurnState(memoryStore, statusStore) })) {
+        restoreTurnState(snapshot, memoryStore, statusStore)
+        throw new Error('新游戏存档保存失败，已保留原进度')
       }
-
-      const systemPrompt = `${nsfwPrompt}
-
-你是角色扮演游戏主持人。${roleInfo}
-
-世界设定：
-${currentWorldBook.substring(0, 2000)}
-
-${lengthPrompt}
-
-${messageMode === 'short' ? `要求（快问快答模式）：
-1. 必须使用全中文输出
-2. 必须使用第三人称视角进行叙述
-3. 快速响应，语言简洁高效
-4. 严格遵循世界书设定和角色设定
-5. 保持剧情连贯性
-6. 根据用户指令生成相应的剧情响应
-7. 【最重要】必须完整叙述完用户指令中的所有内容，即使字数超过500字也必须说完。绝不能因为字数限制而省略、截断或遗漏任何重要情节。完整性是第一优先级，快答是第二优先级。
-8. 优先使用简洁的语言，但必要时可以详细描述以确保完整性
-
-重要：直接输出故事内容，不要有任何推理过程、思考过程、分析过程等元内容。不要输出"根据..."、"考虑到..."、"我认为..."等推理性语言。直接开始叙述。快问快答，但必须把话说完整。` : `要求：
-1. 必须使用全中文输出
-2. 必须使用第三人称视角进行长叙述
-3. 详细描写场景、动作、心理、环境等
-4. 严格遵循世界书设定和角色设定
-5. 保持剧情连贯性
-6. 根据用户指令生成相应的剧情响应
-7. 【最重要】必须完整叙述完用户指令中的所有内容，绝不能中途停止或截断。即使字数超过2000字，也必须把整个事件、场景、动作完整叙述完毕。完整性是第一优先级，字数控制是第二优先级。
-
-重要：直接输出故事内容，不要有任何推理过程、思考过程、分析过程等元内容。不要输出"根据..."、"考虑到..."、"我认为..."等推理性语言。直接开始叙述。必须完成完整的描述，不要中途停止。`}
-
-玩家指令：${userMessage}${messageMode === 'short' ? '\n\n【快问快答要求】请快速、简短地回复，但必须完整叙述完所有内容，即使超字数也要说完。' : '\n\n【重要】请完整叙述完所有内容，必须完成整个事件、场景、动作的描述，绝不能中途停止或截断。即使字数超过2000字也要说完。'}`
-
-      const response = await callDeepseekAPI(
-        currentApiKey,
-        systemPrompt,
-        true,
-        [
-          ...recentHistory,
-          { role: 'user', content: userMessage }
-        ],
-        messageMode === 'short' ? 2000 : messageMode === 'dialogue' ? 3000 : 4000, // 短文模式增加token限制，确保即使超字数也能说完
-        abortController
-      )
-
-      if (!response || response.trim().length === 0) {
-        throw new Error('AI返回空内容')
-      }
-
-      setMessages(prev => [...prev, { role: 'assistant', content: response }])
-    } catch (error) {
-      if (error.message === '请求已取消') {
-        setIsLoading(false)
-        return
-      }
-      console.error('发送消息失败:', error)
-      setMessages(prev => [...prev, { 
-        role: 'assistant', 
-        content: `❌ 发送消息失败：${error.message || '未知错误'}` 
-      }])
-    } finally {
-      setIsLoading(false)
-      abortControllerRef.current = null
-    }
-  }
-
-  const handleAbort = () => {
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort()
-      abortControllerRef.current = null
-    }
-    setIsLoading(false)
-  }
-
-  // 打开图片查看器
-  const openImageViewer = (imageSrc) => {
-    setViewerImage(imageSrc)
-    setImageScale(1)
-    setImagePosition({ x: 0, y: 0 })
-  }
-
-  // 关闭图片查看器
-  const closeImageViewer = () => {
-    setViewerImage(null)
-    setImageScale(1)
-    setImagePosition({ x: 0, y: 0 })
-  }
-
-  // 图片缩放
-  const handleImageZoom = (delta) => {
-    setImageScale(prev => {
-      const newScale = prev + delta
-      return Math.max(0.5, Math.min(5, newScale)) // 限制在0.5倍到5倍之间
-    })
-  }
-
-  // 图片拖拽开始
-  const handleImageDragStart = (e) => {
-    if (e.button !== 0) return // 只响应左键
-    setIsDragging(true)
-    setDragStart({
-      x: e.clientX - imagePosition.x,
-      y: e.clientY - imagePosition.y
-    })
-  }
-
-  // 图片拖拽中
-  const handleImageDrag = (e) => {
-    if (!isDragging) return
-    setImagePosition({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y
-    })
-  }
-
-  // 图片拖拽结束
-  const handleImageDragEnd = () => {
-    setIsDragging(false)
-  }
-
-  // 鼠标滚轮缩放
-  const handleImageWheel = (e) => {
-    e.preventDefault()
-    const delta = e.deltaY > 0 ? -0.1 : 0.1
-    handleImageZoom(delta)
-  }
-
-  // 重置图片位置和缩放
-  const resetImageViewer = () => {
-    setImageScale(1)
-    setImagePosition({ x: 0, y: 0 })
+      setMessages([])
+      setGameStarted(false)
+      setNotice('')
+    } catch (error) { setNotice(error.message) }
   }
 
   return (
     <div className="game-play">
       <div className="game-container">
-        <div className="game-header">
-          <h2 className="title">角色扮演游戏</h2>
+        <header className="game-header">
+          <h2 className="title">角色扮演游戏 · V4.1 Flash</h2>
           <div className="config-buttons">
-            <button 
-              onClick={() => openConfigModal('api')} 
-              className={`config-btn ${currentApiKey ? 'configured' : ''}`}
-            >
-              {currentApiKey ? '✓ API已配置' : '配置API'}
-            </button>
-            <button 
-              onClick={() => openConfigModal('worldbook')} 
-              className={`config-btn ${currentWorldBook ? 'configured' : ''}`}
-            >
-              {currentWorldBook ? '✓ 世界书已配置' : '世界书'}
-            </button>
-            <button 
-              onClick={() => openConfigModal('role')} 
-              className={`config-btn ${currentRole.name ? 'configured' : ''}`}
-            >
-              {currentRole.name ? `✓ ${currentRole.name}` : '角色选择'}
-            </button>
-            <button 
-              onClick={() => openConfigModal('stable-diffusion-api')} 
-              className={`config-btn ${stableDiffusionApiKey ? 'configured' : ''}`}
-            >
-              {stableDiffusionApiKey ? '✓ SD API已配置' : 'SD API配置'}
-            </button>
+            <button disabled={isLoading} className={`config-btn ${currentApiKey ? 'configured' : ''}`} onClick={() => openConfigModal('api')}>{currentApiKey ? '✓ DeepSeek API' : '配置 DeepSeek API'}</button>
+            <button disabled={isLoading} className={`config-btn ${currentWorldBook ? 'configured' : ''}`} onClick={() => openConfigModal('worldbook')}>{currentWorldBook ? '✓ 世界书已配置' : '世界书'}</button>
+            <button disabled={isLoading} className={`config-btn ${currentRole.name ? 'configured' : ''}`} onClick={() => openConfigModal('role')}>{currentRole.name ? `✓ ${currentRole.name}` : '角色选择'}</button>
+            <button disabled={isLoading} className="config-btn" onClick={() => setShowMemoryPanel(true)}>📋 记忆</button>
+            <button disabled={isLoading} className="config-btn" onClick={handleExport}>导出存档</button>
+            {gameStarted && <button disabled={isLoading} className="config-btn" onClick={handleNewGame}>新游戏</button>}
           </div>
-        </div>
-
-        <ConfigModal
-          type={configModal.type}
-          isOpen={configModal.isOpen}
-          onClose={closeConfigModal}
-          onSave={(value) => handleConfigSave(configModal.type, value)}
-          initialValue={getConfigValue(configModal.type)}
-          initialRoleDescription={getRoleDescription()}
-          apiKey={currentApiKey}
-        />
-
+        </header>
+        {notice && <p className="game-notice" role="alert">{notice}</p>}
+        <ConfigModal type={configModal.type} isOpen={configModal.isOpen} onClose={closeConfigModal}
+          onSave={value => handleConfigSave(configModal.type, value)} initialValue={getConfigValue(configModal.type)}
+          initialRoleDescription={getRoleDescription()} apiKey={currentApiKey} llmConfig={currentLLMConfig} />
         {!gameStarted ? (
-          <div className="start-section">
-            <div className="card">
-              <h3>准备开始</h3>
-              <p>请完成以下配置后点击"开始游戏"：</p>
-              <ul>
-                <li className={currentApiKey ? 'completed' : ''}>
-                  {currentApiKey ? '✓' : '○'} API密钥
-                </li>
-                <li className={currentWorldBook ? 'completed' : ''}>
-                  {currentWorldBook ? '✓' : '○'} 世界书
-                </li>
-                <li className={currentRole.name ? 'completed' : ''}>
-                  {currentRole.name ? '✓' : '○'} 角色选择
-                </li>
-              </ul>
-              <div className="custom-opening-section">
-                <label className="custom-opening-toggle">
-                  <input
-                    type="checkbox"
-                    checked={showCustomOpening}
-                    onChange={(e) => setShowCustomOpening(e.target.checked)}
-                    disabled={isLoading}
-                  />
-                  <span>自定义开局（可选）</span>
-                </label>
-                {showCustomOpening && (
-                  <div className="custom-opening-input">
-                    <textarea
-                      value={customOpening}
-                      onChange={(e) => setCustomOpening(e.target.value)}
-                      placeholder="描述你想要的故事开头场景、情节或设定，AI将根据你的描述生成详细的开场白...&#10;&#10;例如：在一个雨夜，我独自走在空无一人的街道上，突然听到身后传来脚步声..."
-                      className="custom-opening-textarea"
-                      rows="6"
-                      disabled={isLoading}
-                    />
-                    <p className="hint">自定义开局是可选的，如果不填写，AI将自动生成开场白</p>
-                  </div>
-                )}
-              </div>
-              <button 
-                onClick={handleStart} 
-                className="btn-start"
-                disabled={!canStart || isLoading}
-              >
-                {isLoading ? '生成开场白中...' : '开始游戏'}
-              </button>
+          <div className="start-section"><div className="card">
+            <h3>准备开始</h3>
+            <p>配置 API、世界书和玩家角色，开始你的第一幕。已有进度会自动保存。</p>
+            <ul>
+              <li className={currentApiKey ? 'completed' : ''}>{currentApiKey ? '✓' : '○'} DeepSeek V4.1 Flash API</li>
+              <li className={currentWorldBook ? 'completed' : ''}>{currentWorldBook ? '✓' : '○'} 世界书</li>
+              <li className={currentRole.name ? 'completed' : ''}>{currentRole.name ? '✓' : '○'} 玩家角色</li>
+            </ul>
+            <div className="story-to-worldbook-section">
+              <button className="btn-story-to-worldbook" disabled={isLoading || isGeneratingWorldBookAndOpening} onClick={() => setShowStoryToWorldBook(!showStoryToWorldBook)}>{showStoryToWorldBook ? '收起' : '✨ 根据故事生成世界书和开头'}</button>
+              {showStoryToWorldBook && <div className="story-to-worldbook-input">
+                <textarea value={userStory} onChange={e => setUserStory(e.target.value)} rows="8" className="story-to-worldbook-textarea" disabled={isLoading || isGeneratingWorldBookAndOpening} placeholder="描述世界、角色与开始时的处境，后续剧情由你主导。" />
+                <button className="btn-generate-worldbook-opening" disabled={isLoading || isGeneratingWorldBookAndOpening || !userStory.trim()} onClick={handleGenerateWorldBookAndOpening}>{isGeneratingWorldBookAndOpening ? worldBookProgress || '准备生成…' : '生成世界书和开头'}</button>
+                {isGeneratingWorldBookAndOpening && <button className="btn-abort" onClick={handleAbort}>取消生成</button>}
+              </div>}
             </div>
-          </div>
+            <div className="custom-opening-section">
+              <label className="custom-opening-toggle"><input type="checkbox" checked={showCustomOpening} disabled={isLoading} onChange={e => setShowCustomOpening(e.target.checked)} /><span>自定义开局（可选）</span></label>
+              {showCustomOpening && <textarea className="custom-opening-textarea" value={customOpening} onChange={e => setCustomOpening(e.target.value)} rows="6" disabled={isLoading} placeholder="描述第一幕的地点、人物和当前处境…" />}
+            </div>
+            <button className="btn-start" disabled={!canStart || isLoading || isGeneratingWorldBookAndOpening} onClick={handleStart}>{isLoading ? '生成第一幕中…' : '开始游戏'}</button>
+            {isLoading && <button className="btn-abort" onClick={handleAbort}>取消生成</button>}
+          </div></div>
         ) : (
-          <div className="game-content-wrapper">
-            <div className="game-main-area">
-              <div className="messages-container">
-                {messages.map((msg, index) => (
-                  <div key={index} className={`message ${msg.role}`}>
-                    <div className="message-content">
-                      {msg.content.split('\n').map((line, i) => (
-                        <p key={i} className="message-text">{line || '\u00A0'}</p>
-                      ))}
-                    </div>
+          <div className="game-content-wrapper"><div className="game-main-area">
+            <div className="messages-container" ref={messagesContainerRef} onScroll={handleMessagesScroll} tabIndex={0} role="region" aria-label="对话记录">
+              {messages.map((msg, index) => (
+                <article key={msg.id || index} className={`message ${msg.role}`}>
+                  <div className="message-content">
+                    {msg.content.split('\n').map((line, i) => <p key={i} className="message-text">{line || '\u00A0'}</p>)}
                   </div>
-                ))}
-                {isLoading && (
-                  <div className="message assistant">
-                    <div className="message-content">
-                      <div className="loading">AI正在思考...</div>
-                    </div>
-                  </div>
-                )}
-                <div ref={messagesEndRef} />
-              </div>
-
-              <div className="input-container">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSendMessage()
-                    }
-                  }}
-                  placeholder={messageMode === 'dialogue' ? '输入角色说的话或旁白信息（留空点击发送可让角色继续说）...' : '输入您的指令或行动...'}
-                  className="message-input"
-                  rows="3"
-                />
-                <div className="input-buttons">
-                  <div className="mode-selector">
-                    <label className="mode-option">
-                      <input
-                        type="radio"
-                        name="messageMode"
-                        value="short"
-                        checked={messageMode === 'short'}
-                        onChange={(e) => setMessageMode(e.target.value)}
-                        disabled={isLoading}
-                      />
-                      <span>短文</span>
-                    </label>
-                    <label className="mode-option">
-                      <input
-                        type="radio"
-                        name="messageMode"
-                        value="long"
-                        checked={messageMode === 'long'}
-                        onChange={(e) => setMessageMode(e.target.value)}
-                        disabled={isLoading}
-                      />
-                      <span>长文</span>
-                    </label>
-                    <label className="mode-option">
-                      <input
-                        type="radio"
-                        name="messageMode"
-                        value="dialogue"
-                        checked={messageMode === 'dialogue'}
-                        onChange={(e) => setMessageMode(e.target.value)}
-                        disabled={isLoading}
-                      />
-                      <span>对话</span>
-                    </label>
-                  </div>
-                  {messageMode === 'dialogue' && (
-                    <input
-                      type="text"
-                      value={targetRole}
-                      onChange={(e) => setTargetRole(e.target.value)}
-                      placeholder="目标角色名称"
-                      className="target-role-input"
-                      disabled={isLoading}
-                    />
-                  )}
-                  {isLoading && (
-                    <button onClick={handleAbort} className="send-btn abort-btn">
-                      ⏹️ 打断
-                    </button>
-                  )}
-                  <button 
-                    onClick={handleSendMessage} 
-                    className="send-btn"
-                    disabled={isLoading || (messageMode !== 'dialogue' && !input.trim())}
-                  >
-                    {messageMode === 'short' ? '短文' : messageMode === 'long' ? '长文' : input.trim() ? '发送' : '继续说'}
-                  </button>
+                  {msg.role === 'assistant' && <StatusBar status={msg.status || {}} rows={msg.memories || []} warning={msg.warning} />}
+                </article>
+              ))}
+              {isLoading && <div className="message assistant"><div className="message-content loading">正在生成故事和状态…</div></div>}
+            </div>
+            <div className="input-container">
+              <textarea className="message-input" value={input} onChange={e => setInput(e.target.value)} disabled={isLoading} rows="3" placeholder={messageMode === 'dialogue' ? '输入对话或动作；留空可以让角色继续说…' : '输入你的行动或指令…'} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); handleSendMessage() } }} />
+              <div className="input-buttons">
+                <div className="mode-selector">
+                  {[['short', '短文'], ['long', '长文'], ['dialogue', '对话']].map(([value, label]) => <label key={value} className="mode-option"><input type="radio" name="messageMode" value={value} checked={messageMode === value} disabled={isLoading} onChange={e => setMessageMode(e.target.value)} /><span>{label}</span></label>)}
                 </div>
+                {messageMode === 'dialogue' && <input className="target-role-input" aria-label="目标角色" placeholder="目标角色名称" value={targetRole} disabled={isLoading} onChange={e => setTargetRole(e.target.value)} />}
+                {isLoading && <button className="send-btn abort-btn" onClick={handleAbort}>⏹ 打断</button>}
+                {canUndo() && <button className="btn-undo" onClick={handleUndo} title="撤回上一轮，同时恢复状态与记忆">↶ 撤回</button>}
+                <button className="send-btn" disabled={isLoading || (messageMode !== 'dialogue' && !input.trim())} onClick={handleSendMessage}>{messageMode === 'dialogue' && !input.trim() ? '继续说' : '发送'}</button>
               </div>
             </div>
-
-            <div className="image-generation-panel">
-              <div className="image-panel-header">
-                <h3>场景图片生成</h3>
-              </div>
-              <div className="image-panel-content">
-                <div className="image-display-area">
-                  {isGeneratingImage ? (
-                    <div className="image-loading">
-                      <div className="loading-spinner"></div>
-                      <p>正在生成图片...</p>
-                    </div>
-                  ) : generatedImages.length > 0 ? (
-                    <div className="generated-images-grid">
-                      {generatedImages.map((image, index) => (
-                        <div key={index} className="generated-image-item">
-                          <img 
-                            src={image} 
-                            alt={`生成的图片 ${index + 1}`}
-                            onClick={() => openImageViewer(image)}
-                            className="clickable-image"
-                          />
-                          <a 
-                            href={image} 
-                            download={`generated-image-${index + 1}.png`}
-                            className="download-btn"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            下载
-                          </a>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="image-placeholder">
-                      <p>生成的图片将显示在这里</p>
-                    </div>
-                  )}
-                </div>
-                <div className="image-controls">
-                  <div className="image-prompt-section">
-                    <label>图片生成</label>
-                    <textarea
-                      value={imagePrompt}
-                      onChange={(e) => setImagePrompt(e.target.value)}
-                      placeholder="用自然语言描述你想要生成的场景图片，例如：一座建在山上的奇幻城堡，细节丰富，高质量，史诗般的场景"
-                      className="image-prompt-input"
-                      rows="4"
-                      disabled={isGeneratingImage}
-                    />
-                    <p className="hint-small">AI会自动将你的描述转换为专业提示词</p>
-                  </div>
-                  <div className="image-settings">
-                    <label>生成数量：</label>
-                    <select
-                      value={numImages}
-                      onChange={(e) => setNumImages(parseInt(e.target.value))}
-                      className="num-images-select"
-                      disabled={isGeneratingImage}
-                    >
-                      <option value={1}>1张</option>
-                      <option value={2}>2张</option>
-                      <option value={3}>3张</option>
-                      <option value={4}>4张</option>
-                    </select>
-                  </div>
-                  <button
-                    onClick={handleGenerateImage}
-                    disabled={isGeneratingImage || !imagePrompt.trim() || !stableDiffusionApiKey || !currentApiKey}
-                    className="btn-generate-image"
-                  >
-                    {isGeneratingImage ? '生成中...' : '生成图片'}
-                  </button>
-                  {!stableDiffusionApiKey && (
-                    <p className="hint">请先配置Stable Diffusion API密钥</p>
-                  )}
-                  {stableDiffusionApiKey && !currentApiKey && (
-                    <p className="hint">请先配置Deepseek API密钥（用于转换提示词）</p>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
+          </div></div>
         )}
-
-        {/* 图片查看器 */}
-        {viewerImage && (
-          <div 
-            className="image-viewer-overlay"
-            onClick={closeImageViewer}
-            onWheel={handleImageWheel}
-          >
-            <div 
-              className="image-viewer-container"
-              onClick={(e) => e.stopPropagation()}
-              onMouseDown={handleImageDragStart}
-              onMouseMove={handleImageDrag}
-              onMouseUp={handleImageDragEnd}
-              onMouseLeave={handleImageDragEnd}
-            >
-              <div className="image-viewer-controls">
-                <button 
-                  onClick={() => handleImageZoom(0.1)}
-                  className="viewer-btn zoom-in"
-                  title="放大"
-                >
-                  +
-                </button>
-                <button 
-                  onClick={() => handleImageZoom(-0.1)}
-                  className="viewer-btn zoom-out"
-                  title="缩小"
-                >
-                  −
-                </button>
-                <button 
-                  onClick={resetImageViewer}
-                  className="viewer-btn reset"
-                  title="重置"
-                >
-                  ↺
-                </button>
-                <button 
-                  onClick={closeImageViewer}
-                  className="viewer-btn close"
-                  title="关闭"
-                >
-                  ×
-                </button>
-              </div>
-              <div 
-                className="image-viewer-content"
-                style={{
-                  transform: `translate(${imagePosition.x}px, ${imagePosition.y}px) scale(${imageScale})`,
-                  cursor: isDragging ? 'grabbing' : 'grab'
-                }}
-              >
-                <img 
-                  src={viewerImage} 
-                  alt="查看的图片"
-                  draggable={false}
-                />
-              </div>
-              <div className="image-viewer-info">
-                <span>缩放: {(imageScale * 100).toFixed(0)}%</span>
-                <span>拖拽移动 | 滚轮缩放 | 点击外部关闭</span>
-              </div>
-            </div>
-          </div>
-        )}
+        <MemoryTablePanel isOpen={showMemoryPanel} onChange={snapshot => {
+          if (!saveGameSession({ ...sessionData(), snapshot })) {
+            setNotice('记忆已修改，但整局存档写入失败；请导出存档后刷新。')
+            throw new Error('整局存档写入失败，请导出存档，避免刷新后丢失本次修改。')
+          }
+        }} onClose={() => { setShowMemoryPanel(false); setMemoryRevision(value => value + 1) }} />
       </div>
     </div>
   )
 }
-
 export default GamePlay

@@ -1,0 +1,111 @@
+.memory-table-panel-overlay, .memory-edit-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgb(25 24 47 / 55%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.memory-table-panel, .memory-edit-modal {
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 20px 60px rgb(0 0 0 / 25%);
+  width: 100%;
+  max-width: 960px;
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #282638;
+  outline: none;
+}
+
+.memory-panel-header, .memory-edit-header {
+  padding: 18px 24px;
+  border-bottom: 1px solid #e9e7f0;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  background: #f8f7fc;
+}
+
+.memory-panel-header h2, .memory-edit-header h3 { margin: 0; font-size: 20px; }
+.memory-panel-close, .memory-edit-close {
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  font-size: 26px;
+  color: #625d73;
+  cursor: pointer;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.memory-panel-close:hover, .memory-edit-close:hover { background: #ebe8f3; }
+.memory-panel-content, .memory-edit-content { flex: 1; overflow-y: auto; padding: 22px 24px; min-height: 0; }
+.memory-section { margin-bottom: 28px; }
+.memory-section:last-child { margin-bottom: 0; }
+.memory-section-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; }
+.memory-section-header h3 { margin: 0; font-size: 16px; }
+.memory-section-note { margin: 0 0 16px; font-size: 13px; color: #686374; line-height: 1.7; }
+.memory-table-tabs { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 20px; }
+.memory-table-tab { border: 1px solid #ded9eb; padding: 9px 12px; background: #fff; border-radius: 8px; color: #554d66; cursor: pointer; display: flex; align-items: center; gap: 8px; font: inherit; font-size: 13px; }
+.memory-table-tab.active { border-color: #7362b1; color: #4b357e; background: #f1edf9; font-weight: 600; }
+.memory-table-tab span { padding: 2px 6px; border-radius: 5px; background: #ece9f3; font-size: 12px; font-variant-numeric: tabular-nums; }
+.memory-btn-create, .memory-btn-save { padding: 9px 14px; background: #655099; color: #fff; border: none; border-radius: 7px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.memory-btn-create:hover, .memory-btn-save:hover { background: #523b86; }
+.memory-rows-list { display: flex; flex-direction: column; gap: 14px; }
+.memory-row-item { border: 1px solid #dedbe8; border-radius: 9px; padding: 16px; background: #fff; }
+.memory-row-item.pinned { border-color: #d1b16a; background: #fffdf5; }
+.memory-row-header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid #eae7ee; }
+.memory-pin-label { color: #806015; font-size: 12px; margin-right: auto; }
+.memory-btn-pin, .memory-btn-edit, .memory-btn-delete { padding: 7px 11px; border: 1px solid; border-radius: 6px; font-size: 13px; cursor: pointer; background: #fff; }
+.memory-btn-pin { color: #806015; border-color: #c7a864; }
+.memory-btn-pin:hover { background: #fff6dc; }
+.memory-btn-edit { color: #614b97; border-color: #aa98ce; }
+.memory-btn-edit:hover { background: #f2eefb; }
+.memory-btn-delete { color: #ab3c38; border-color: #d3a09e; }
+.memory-btn-delete:hover { background: #fff0ef; }
+.memory-row-content { margin: 0; display: flex; flex-direction: column; gap: 9px; }
+.memory-row-field, .status-field { display: grid; grid-template-columns: 125px minmax(0, 1fr); gap: 12px; font-size: 14px; line-height: 1.75; }
+.memory-field-label, .status-label { font-weight: 600; color: #615a71; overflow-wrap: anywhere; }
+.memory-field-value, .status-value { margin: 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-source-records { margin-top: 16px; padding-top: 14px; border-top: 1px solid #eae7ee; }
+.memory-source-records h4 { margin: 0 0 12px; font-size: 13px; color: #655099; }
+.memory-source-records ol { margin: 0; padding-left: 24px; }
+.memory-source-records li { margin-bottom: 16px; padding-left: 4px; font-size: 13px; line-height: 1.7; }
+.memory-source-records li:last-child { margin-bottom: 0; }
+.memory-empty { text-align: center; padding: 32px; color: #797280; border: 1px dashed #dcd5e7; border-radius: 8px; font-size: 14px; }
+.status-card { margin: 0; border: 1px solid #dfdaeb; border-radius: 9px; padding: 16px; background: #faf9fd; display: flex; flex-direction: column; gap: 11px; }
+.status-field + .status-field { border-top: 1px solid #eeebf4; padding-top: 10px; }
+.status-label { color: #655099; }
+.memory-edit-overlay { z-index: 10001; background: rgb(25 24 47 / 35%); }
+.memory-edit-modal { max-width: 640px; max-height: 85dvh; }
+.memory-edit-header h3 { font-size: 18px; }
+.memory-edit-field { margin-bottom: 16px; }
+.memory-edit-field label { display: block; margin-bottom: 7px; font-weight: 600; font-size: 14px; }
+.memory-edit-input { width: 100%; padding: 10px 12px; border: 1px solid #cfc8dd; border-radius: 6px; font: inherit; font-size: 14px; color: #282638; background: #fff; box-sizing: border-box; }
+.memory-edit-textarea { resize: vertical; min-height: 100px; line-height: 1.7; }
+.memory-edit-actions { display: flex; gap: 12px; margin-top: 22px; padding-top: 18px; border-top: 1px solid #e6e2ed; }
+.memory-btn-save, .memory-btn-cancel { flex: 1; padding: 12px; font-size: 14px; }
+.memory-btn-cancel { background: #fff; color: #615a71; border: 1px solid #cfc8dd; border-radius: 7px; cursor: pointer; }
+.memory-btn-cancel:hover { background: #f6f4fa; }
+.memory-feedback { padding: 12px 14px; border: 1px solid; border-radius: 7px; font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
+.memory-error { background: #fff0ee; border-color: #dfb1aa; color: #9d3831; }
+.memory-success { background: #eef7f1; border-color: #afcebb; color: #315f43; }
+.memory-table-panel button:focus-visible, .memory-edit-input:focus-visible { outline: 3px solid #a393cb; outline-offset: 3px; }
+
+@media (max-width: 600px) {
+  .memory-table-panel-overlay, .memory-edit-overlay { padding: 10px; }
+  .memory-table-panel { max-height: 95dvh; }
+  .memory-panel-header, .memory-edit-header, .memory-panel-content, .memory-edit-content { padding: 16px; }
+  .memory-panel-header h2 { font-size: 18px; }
+  .memory-row-field, .status-field { grid-template-columns: 1fr; gap: 3px; }
+  .memory-table-tabs { gap: 6px; }
+  .memory-table-tab { flex: 1 1 calc(50% - 6px); justify-content: space-between; }
+  .memory-row-item, .status-card { padding: 12px; }
+}

@@ -1,12 +1,13 @@
 {
   "name": "story-ai-rpg",
-  "version": "1.0.0",
-  "description": "基于Deepseek API的故事角色扮演AI",
+  "version": "2.0.0",
+  "description": "固定 DeepSeek V4.1 Flash 的本地故事角色扮演游戏",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.mjs"
   },
   "dependencies": {
     "react": "^18.2.0",

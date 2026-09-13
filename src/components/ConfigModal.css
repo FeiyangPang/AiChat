@@ -191,6 +191,58 @@
   margin-bottom: 0;
 }
 
+.api-config-grid {
+  display: grid;
+  gap: 4px;
+}
+
+.fixed-model-info {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+  border: 1px solid #dfe3f7;
+  border-radius: 8px;
+  background: #f6f7ff;
+  color: #3b4262;
+}
+
+.fixed-model-info span {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.btn-test-api,
+.btn-abort {
+  padding: 8px 12px;
+  border: 1px solid #667eea;
+  border-radius: 6px;
+  color: #667eea;
+  background: #fff;
+  cursor: pointer;
+}
+
+.btn-test-api {
+  justify-self: start;
+}
+
+.btn-abort {
+  margin-top: 10px;
+  color: #c0392b;
+  border-color: #c0392b;
+}
+
+.btn-test-api:hover:not(:disabled) {
+  color: #fff;
+  background: #667eea;
+}
+
+.btn-test-api:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;

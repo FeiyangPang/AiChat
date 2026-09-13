@@ -60,10 +60,16 @@ body::before {
   width: 100%;
   max-width: 100%;
   margin: 0 auto;
-  height: 100vh;
+  height: calc(100vh - 40px);
+  height: calc(100dvh - 40px);
   display: flex;
   flex-direction: column;
   position: relative;
   z-index: 1;
+}
+
+@media (max-width: 600px) {
+  body { padding: 10px; }
+  #root { height: calc(100vh - 20px); height: calc(100dvh - 20px); }
 }
 
